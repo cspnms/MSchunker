@@ -1,4 +1,17 @@
-from .core import Chunk, Chunker, chunk_text
+from .core import (
+    Chunk,
+    Chunker,
+    chunk_text,
+    analyze_chunks,
+    explain_chunk,
+)
+from .version import __version__
 
-__all__ = ["Chunk", "Chunker", "chunk_text"]
-__version__ = "0.1.0"
+__all__ = [
+    "Chunk",
+    "Chunker",
+    "chunk_text",
+    "analyze_chunks",
+    "explain_chunk",
+    "__version__",
+]
