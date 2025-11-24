@@ -1,27 +1,60 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Dict, Any, Tuple
+from typing import Callable, List, Optional, Dict, Any, Tuple, Iterable
 import re
 
+# -----------------------------
+# Types
+# -----------------------------
 
 TokenCounter = Callable[[str], int]
+SemanticSimilarity = Callable[[str, str], float]
 
 
 @dataclass
 class Chunk:
+    """
+    Represents a single text chunk plus metadata describing how/why it was created.
+
+    Attributes
+    ----------
+    text:
+        The chunk text itself.
+    meta:
+        Metadata such as:
+        - source_id: optional document id
+        - section_index, section_heading
+        - paragraph_indices: (start, end) within section
+        - sentence_indices: (start, end) within paragraph scope
+        - split_reason: "paragraph_boundary" | "sentence_limit" | "hard_limit"
+        - strategy: "auto" | "fixed" | "paragraph" | "sentence"
+        - overlap_from_prev: bool
+        - overlap_tokens: int
+        - chunk_index: int (sequential id)
+    """
     text: str
     meta: Dict[str, Any] = field(default_factory=dict)
 
 
-# Simple sentence splitter
-DEFAULT_SENTENCE_REGEX = re.compile(r"(?<=[.!?])\s+")
+# -----------------------------
+# Basic utilities
+# -----------------------------
+
+_DEFAULT_SENTENCE_REGEX = re.compile(r"(?<=[.!?。！？])\s+")
+_HEADING_REGEX = re.compile(r"^\s*#{1,6}\s+(.+)$")
 
 
-def default_token_counter(text: str) -> int:
-    return len(re.findall(r"\w+|[^\w\s]", text))
+def _default_token_counter(text: str) -> int:
+    """Very simple whitespace-based token counter.
+
+    Users can pass a more accurate counter (e.g. using tiktoken) if needed.
+    """
+    return len(text.split())
 
 
-def _ensure_token_counter(token_counter: Optional[TokenCounter]) -> TokenCounter:
-    return token_counter or default_token_counter
+def _ensure_token_counter(counter: Optional[TokenCounter]) -> TokenCounter:
+    return counter or _default_token_counter
 
 
 def _length_ok(
@@ -37,51 +70,84 @@ def _length_ok(
     return True
 
 
-def _split_into_sections(text: str) -> List[Tuple[Optional[str], str]]:
-    lines = text.splitlines()
-    sections = []
-    current_heading = None
-    current_body = []
+# -----------------------------
+# Structural splitting
+# -----------------------------
 
-    def flush():
-        nonlocal current_heading, current_body
-        if current_body or current_heading is not None:
-            sections.append((current_heading, "\n".join(current_body).strip()))
-        current_heading = None
-        current_body = []
+
+def _split_into_sections(text: str) -> List[Tuple[Optional[str], str]]:
+    """Split text into (heading, body) sections.
+
+    Supports:
+    - Markdown-style headings starting with '#'
+    - Underline-style headings: a line followed by === or --- line
+    """
+    lines = text.splitlines()
+    sections: List[Tuple[Optional[str], List[str]]] = []
+    current_heading: Optional[str] = None
+    current_body: List[str] = []
 
     i = 0
     while i < len(lines):
-        line = lines[i].rstrip()
-        next_line = lines[i + 1].rstrip() if i + 1 < len(lines) else ""
+        line = lines[i]
+        # Underline-style heading
+        if i + 1 < len(lines):
+            next_line = lines[i + 1]
+            if next_line.strip() and set(next_line.strip()) in ({"="}, {"-"}):
+                # Flush previous section
+                if current_heading is not None or current_body:
+                    sections.append((current_heading, current_body))
+                current_heading = line.strip()
+                current_body = []
+                i += 2
+                continue
 
-        if line.startswith("#"):
-            flush()
-            current_heading = line.lstrip("#").strip() or None
-            i += 1
-            continue
-
-        if set(next_line) <= {"=", "-"} and len(next_line) >= 3 and line.strip():
-            flush()
-            current_heading = line.strip()
-            i += 2
-            continue
-
-        current_body.append(line)
+        # Markdown-style heading
+        m = _HEADING_REGEX.match(line)
+        if m:
+            if current_heading is not None or current_body:
+                sections.append((current_heading, current_body))
+            current_heading = m.group(1).strip()
+            current_body = []
+        else:
+            current_body.append(line)
         i += 1
 
-    flush()
-    return sections
+    # Final section
+    if current_heading is not None or current_body:
+        sections.append((current_heading, current_body))
+
+    result: List[Tuple[Optional[str], str]] = []
+    for heading, body_lines in sections:
+        body_text = "\n".join(body_lines).strip("\n")
+        result.append((heading, body_text))
+    return result or [(None, text)]
 
 
 def _split_into_paragraphs(text: str) -> List[str]:
-    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    return paras if paras else ([text.strip()] if text.strip() else [])
-
-
-def _split_into_sentences(text: str) -> List[str]:
+    """Split text into paragraphs by blank lines."""
     text = text.strip()
-    return [p.strip() for p in DEFAULT_SENTENCE_REGEX.split(text) if p.strip()]
+    if not text:
+        return []
+    paragraphs = re.split(r"\n\s*\n+", text)
+    return [p.strip() for p in paragraphs if p.strip()]
+
+
+def _split_into_sentences(paragraph: str) -> List[str]:
+    """Split a paragraph into sentences.
+
+    This is a heuristic splitter; users can pre-split if they need more control.
+    """
+    paragraph = paragraph.strip()
+    if not paragraph:
+        return []
+    parts = _DEFAULT_SENTENCE_REGEX.split(paragraph)
+    return [s.strip() for s in parts if s.strip()]
+
+
+# -----------------------------
+# Hard splitting by tokens / chars
+# -----------------------------
 
 
 def _hard_split(
@@ -90,203 +156,432 @@ def _hard_split(
     max_chars: Optional[int],
     token_counter: TokenCounter,
 ) -> List[str]:
-    if max_chars is None and max_tokens is None:
+    """Split text greedily by tokens/characters when higher-level structure fails."""
+    if max_tokens is None and max_chars is None:
         return [text]
 
-    chunks = []
-    n = len(text)
-    start = 0
+    tokens = text.split()
+    chunks: List[str] = []
+    current_tokens: List[str] = []
 
-    while start < n:
-        end = min(start + max_chars, n) if max_chars else n
-        candidate = text[start:end]
+    def current_text() -> str:
+        return " ".join(current_tokens)
 
-        if max_tokens:
-            while token_counter(candidate) > max_tokens and end > start + 1:
-                end -= 1
-                candidate = text[start:end]
-
-        if not candidate:
-            break
-
-        chunks.append(candidate)
-        start = end
-
+    for tok in tokens:
+        current_tokens.append(tok)
+        ct = current_text()
+        if not _length_ok(ct, max_tokens, max_chars, token_counter):
+            # Remove last token and flush previous
+            current_tokens.pop()
+            if current_tokens:
+                chunks.append(" ".join(current_tokens))
+            # Start new with current token
+            current_tokens = [tok]
+    if current_tokens:
+        chunks.append(" ".join(current_tokens))
     return chunks
+
+
+# -----------------------------
+# Core hierarchical chunking
+# -----------------------------
+
+
+def _chunk_section(
+    section_text: str,
+    section_index: int,
+    section_heading: Optional[str],
+    max_tokens: Optional[int],
+    max_chars: Optional[int],
+    token_counter: TokenCounter,
+    strategy: str,
+) -> List[Chunk]:
+    """Chunk a single section using paragraphs/sentences and fallbacks."""
+    chunks: List[Chunk] = []
+
+    if strategy == "fixed":
+        for piece in _hard_split(section_text, max_tokens, max_chars, token_counter):
+            chunks.append(
+                Chunk(
+                    text=piece,
+                    meta={
+                        "section_index": section_index,
+                        "section_heading": section_heading,
+                        "paragraph_indices": None,
+                        "sentence_indices": None,
+                        "split_reason": "hard_limit",
+                        "strategy": strategy,
+                    },
+                )
+            )
+        return chunks
+
+    paragraphs = _split_into_paragraphs(section_text)
+    if not paragraphs:
+        return []
+
+    paragraph_start_idx = 0
+    current_buffer: List[Tuple[int, str]] = []  # (paragraph_index, text)
+
+    def flush_buffer(reason: str) -> None:
+        nonlocal current_buffer
+        if not current_buffer:
+            return
+        text = "\n\n".join(p for _, p in current_buffer)
+        para_indices = (current_buffer[0][0], current_buffer[-1][0])
+        chunks.append(
+            Chunk(
+                text=text,
+                meta={
+                    "section_index": section_index,
+                    "section_heading": section_heading,
+                    "paragraph_indices": para_indices,
+                    "sentence_indices": None,
+                    "split_reason": reason,
+                    "strategy": strategy,
+                },
+            )
+        )
+        current_buffer = []
+
+    for local_idx, para in enumerate(paragraphs):
+        para_index = paragraph_start_idx + local_idx
+        if not para.strip():
+            continue
+
+        # If paragraph alone is bigger than allowed, split it further.
+        if not _length_ok(para, max_tokens, max_chars, token_counter):
+            # Flush current paragraphs buffer first.
+            flush_buffer("paragraph_boundary")
+
+            sentences = _split_into_sentences(para)
+            if not sentences:
+                # Last resort: hard split paragraph
+                for piece in _hard_split(para, max_tokens, max_chars, token_counter):
+                    chunks.append(
+                        Chunk(
+                            text=piece,
+                            meta={
+                                "section_index": section_index,
+                                "section_heading": section_heading,
+                                "paragraph_indices": (para_index, para_index),
+                                "sentence_indices": None,
+                                "split_reason": "hard_limit",
+                                "strategy": strategy,
+                            },
+                        )
+                    )
+                continue
+
+            # Accumulate sentences into chunks
+            sentence_start_idx = 0
+            buf_sentences: List[Tuple[int, str]] = []
+            for s_local_idx, sentence in enumerate(sentences):
+                sent_index = sentence_start_idx + s_local_idx
+                candidate_parts = [s for _, s in buf_sentences] + [sentence]
+                candidate_text = " ".join(candidate_parts)
+                if _length_ok(candidate_text, max_tokens, max_chars, token_counter):
+                    buf_sentences.append((sent_index, sentence))
+                else:
+                    if buf_sentences:
+                        text = " ".join(s for _, s in buf_sentences)
+                        sent_indices = (buf_sentences[0][0], buf_sentences[-1][0])
+                        chunks.append(
+                            Chunk(
+                                text=text,
+                                meta={
+                                    "section_index": section_index,
+                                    "section_heading": section_heading,
+                                    "paragraph_indices": (para_index, para_index),
+                                    "sentence_indices": sent_indices,
+                                    "split_reason": "sentence_limit",
+                                    "strategy": strategy,
+                                },
+                            )
+                        )
+                    # Start new buffer with current sentence
+                    buf_sentences = [(sent_index, sentence)]
+
+            if buf_sentences:
+                text = " ".join(s for _, s in buf_sentences)
+                sent_indices = (buf_sentences[0][0], buf_sentences[-1][0])
+                chunks.append(
+                    Chunk(
+                        text=text,
+                        meta={
+                            "section_index": section_index,
+                            "section_heading": section_heading,
+                            "paragraph_indices": (para_index, para_index),
+                            "sentence_indices": sent_indices,
+                            "split_reason": "sentence_limit",
+                            "strategy": strategy,
+                        },
+                    )
+                )
+        else:
+            # Paragraph fits, try to add to current buffer
+            candidate_paragraphs = [p for _, p in current_buffer] + [para]
+            candidate_text = "\n\n".join(candidate_paragraphs)
+            if _length_ok(candidate_text, max_tokens, max_chars, token_counter):
+                current_buffer.append((para_index, para))
+            else:
+                # Flush and start a new chunk with this paragraph
+                flush_buffer("paragraph_boundary")
+                current_buffer.append((para_index, para))
+
+    # Flush remaining buffered paragraphs
+    flush_buffer("paragraph_boundary")
+    return chunks
+
+
+# -----------------------------
+# Overlap
+# -----------------------------
 
 
 def _apply_overlap(
     chunks: List[Chunk],
     overlap_tokens: int,
     token_counter: TokenCounter,
+    max_tokens: Optional[int],
+    max_chars: Optional[int],
 ) -> List[Chunk]:
+    """Apply token-based overlap between consecutive chunks.
+
+    Overlap is best-effort: we do not strictly re-enforce max_tokens/max_chars
+    after overlap to avoid destroying context. Users needing strict limits can
+    post-process or set overlap to 0.
+    """
     if overlap_tokens <= 0 or len(chunks) <= 1:
+        # Still annotate chunk_index for convenience
+        for idx, ch in enumerate(chunks):
+            ch.meta.setdefault("chunk_index", idx)
+            ch.meta.setdefault("overlap_from_prev", False)
+            ch.meta.setdefault("overlap_tokens", 0)
         return chunks
 
-    overlapped = []
-    prev_tail = None
+    overlapped: List[Chunk] = []
+    prev_tokens: List[str] = []
 
     for idx, ch in enumerate(chunks):
-        base_text = ch.text
-        combined = f"{prev_tail} {base_text}".strip() if prev_tail else base_text
+        text = ch.text
+        tokens = text.split()
+        if idx == 0:
+            # First chunk, no overlap
+            prev_tokens = tokens
+            ch.meta["chunk_index"] = idx
+            ch.meta["overlap_from_prev"] = False
+            ch.meta["overlap_tokens"] = 0
+            overlapped.append(ch)
+            continue
 
-        meta = dict(ch.meta)
-        meta["chunk_index"] = idx
-        if prev_tail:
-            meta["overlap_from_prev"] = True
+        # Determine overlap slice from previous chunk
+        overlap_slice = prev_tokens[-overlap_tokens:] if prev_tokens else []
+        if overlap_slice:
+            prefix = " ".join(overlap_slice)
+            new_text = prefix + "\n\n" + text
+        else:
+            new_text = text
 
-        overlapped.append(Chunk(combined, meta))
+        ch.text = new_text
+        ch.meta["chunk_index"] = idx
+        ch.meta["overlap_from_prev"] = bool(overlap_slice)
+        ch.meta["overlap_tokens"] = len(overlap_slice)
 
-        tokens = re.findall(r"\w+|[^\w\s]", base_text)
-        prev_tail = " ".join(tokens[-overlap_tokens:]) if len(tokens) > overlap_tokens else base_text
+        # We deliberately do not trim to max_tokens/max_chars here,
+        # to preserve context boundary decisions. Users can enforce
+        # hard limits at the call-site if absolutely required.
+        overlapped.append(ch)
+        prev_tokens = tokens
 
     return overlapped
+
+
+# -----------------------------
+# Public API
+# -----------------------------
 
 
 def chunk_text(
     text: str,
     max_tokens: Optional[int] = 512,
     max_chars: Optional[int] = None,
-    overlap_tokens: int = 0,
+    overlap_tokens: int = 64,
     strategy: str = "auto",
     token_counter: Optional[TokenCounter] = None,
     source_id: Optional[str] = None,
+    task: Optional[str] = None,
 ) -> List[Chunk]:
+    """Chunk text into LLM-ready pieces.
+
+    Parameters
+    ----------
+    text:
+        Input text to be chunked.
+    max_tokens:
+        Soft limit on tokens per chunk. If None, only max_chars is used.
+    max_chars:
+        Soft limit on characters per chunk. If None, only max_tokens is used.
+    overlap_tokens:
+        Number of tokens from the end of chunk N to prepend to chunk N+1.
+    strategy:
+        "auto"  -> sections -> paragraphs -> sentences -> hard limit
+        "fixed" -> ignore structure, just hard-split
+    token_counter:
+        Optional custom token counter.
+    source_id:
+        Optional identifier for the source document, stored in metadata.
+    task:
+        Optional hint: "rag", "qa", "summarization", "memory".
+        Used only to adjust sane defaults if max_tokens is None.
+
+    Returns
+    -------
+    List[Chunk]
+        A list of Chunk objects with text and rich metadata.
+    """
     token_counter = _ensure_token_counter(token_counter)
-    if not text.strip():
+
+    if not text or not text.strip():
         return []
 
-    if strategy not in {"auto", "fixed"}:
-        raise ValueError(f"Unknown strategy: {strategy}")
+    # Task-adaptive defaults (only if user didn't pass explicit max_tokens)
+    if max_tokens is None:
+        if task in ("rag", "qa"):
+            max_tokens = 256
+        elif task == "summarization":
+            max_tokens = 1024
+        elif task == "memory":
+            max_tokens = 512
+        else:
+            max_tokens = 512
 
-    if strategy == "fixed":
-        parts = _hard_split(text, max_tokens, max_chars, token_counter)
-        out = []
-        offset = 0
-        for i, part in enumerate(parts):
-            start = text.find(part, offset)
-            end = start + len(part)
-            out.append(Chunk(part, {
-                "source_id": source_id,
-                "split_reason": "hard_token_limit",
-                "offset_start": start,
-                "offset_end": end,
-                "chunk_index": i,
-            }))
-            offset = end
-        return _apply_overlap(out, overlap_tokens, token_counter)
+    if strategy not in ("auto", "fixed"):
+        raise ValueError(f"Unsupported strategy: {strategy!r}")
 
     sections = _split_into_sections(text)
-    chunks = []
-    global_offset = 0
+    all_chunks: List[Chunk] = []
 
-    for sec_i, (heading, body) in enumerate(sections):
-        paragraphs = _split_into_paragraphs(body)
+    for section_index, (heading, body) in enumerate(sections):
+        if not body.strip():
+            continue
+        section_chunks = _chunk_section(
+            section_text=body,
+            section_index=section_index,
+            section_heading=heading,
+            max_tokens=max_tokens,
+            max_chars=max_chars,
+            token_counter=token_counter,
+            strategy=strategy,
+        )
+        for ch in section_chunks:
+            ch.meta.setdefault("source_id", source_id)
+        all_chunks.extend(section_chunks)
 
-        cursor = 0
-        para_offsets = []
-        for p in paragraphs:
-            start = body.find(p, cursor)
-            end = start + len(p)
-            para_offsets.append((start, end))
-            cursor = end
+    # Apply overlap (and fill chunk_index)
+    all_chunks = _apply_overlap(
+        all_chunks,
+        overlap_tokens=overlap_tokens,
+        token_counter=token_counter,
+        max_tokens=max_tokens,
+        max_chars=max_chars,
+    )
 
-        for para_i, (para, (p_start, p_end)) in enumerate(zip(paragraphs, para_offsets)):
-            para_global_start = global_offset + p_start
-            para_global_end = global_offset + p_end
-
-            if _length_ok(para, max_tokens, max_chars, token_counter):
-                chunks.append(Chunk(para, {
-                    "source_id": source_id,
-                    "section_index": sec_i,
-                    "section_heading": heading,
-                    "paragraph_index": para_i,
-                    "split_reason": "paragraph_boundary",
-                    "offset_start": para_global_start,
-                    "offset_end": para_global_end,
-                }))
-                continue
-
-            sentences = _split_into_sentences(para)
-            buf = ""
-            buf_start = 0
-            search_pos = 0
-
-            def flush(reason):
-                nonlocal buf, buf_start
-                if not buf:
-                    return
-                end = buf_start + len(buf)
-                chunks.append(Chunk(buf, {
-                    "source_id": source_id,
-                    "section_index": sec_i,
-                    "section_heading": heading,
-                    "paragraph_index": para_i,
-                    "split_reason": reason,
-                    "offset_start": para_global_start + buf_start,
-                    "offset_end": para_global_start + end,
-                }))
-                buf = ""
-
-            for sent in sentences:
-                pos = para.find(sent, search_pos)
-                candidate = f"{buf} {sent}".strip() if buf else sent
-
-                if _length_ok(candidate, max_tokens, max_chars, token_counter):
-                    if not buf:
-                        buf_start = pos
-                    buf = candidate
-                    search_pos = pos + len(sent)
-                else:
-                    flush("sentence_limit")
-
-                    if not _length_ok(sent, max_tokens, max_chars, token_counter):
-                        for part in _hard_split(sent, max_tokens, max_chars, token_counter):
-                            local_start = para.find(part)
-                            chunks.append(Chunk(part, {
-                                "source_id": source_id,
-                                "section_index": sec_i,
-                                "section_heading": heading,
-                                "paragraph_index": para_i,
-                                "split_reason": "hard_token_limit",
-                                "offset_start": para_global_start + local_start,
-                                "offset_end": para_global_start + local_start + len(part),
-                            }))
-                        continue
-
-                    buf = sent
-                    buf_start = pos
-                    search_pos = pos + len(sent)
-
-            flush("sentence_limit")
-
-        global_offset += len(body) + 1
-
-    return _apply_overlap(chunks, overlap_tokens, token_counter)
+    return all_chunks
 
 
 class Chunker:
+    """Stateful convenience wrapper around `chunk_text`.
+
+    Example
+    -------
+    >>> c = Chunker(max_tokens=512, overlap_tokens=64)
+    >>> chunks = c.chunk(my_long_text, source_id="doc-1")
+    """
+
     def __init__(
         self,
         max_tokens: Optional[int] = 512,
         max_chars: Optional[int] = None,
-        overlap_tokens: int = 0,
+        overlap_tokens: int = 64,
         strategy: str = "auto",
         token_counter: Optional[TokenCounter] = None,
-    ):
+        task: Optional[str] = None,
+    ) -> None:
         self.max_tokens = max_tokens
         self.max_chars = max_chars
         self.overlap_tokens = overlap_tokens
         self.strategy = strategy
         self.token_counter = token_counter
+        self.task = task
 
     def chunk(self, text: str, source_id: Optional[str] = None) -> List[Chunk]:
         return chunk_text(
-            text,
+            text=text,
             max_tokens=self.max_tokens,
             max_chars=self.max_chars,
             overlap_tokens=self.overlap_tokens,
             strategy=self.strategy,
             token_counter=self.token_counter,
             source_id=source_id,
+            task=self.task,
         )
+
+
+# -----------------------------
+# Introspection / evaluation helpers
+# -----------------------------
+
+
+def analyze_chunks(
+    chunks: Iterable[Chunk],
+    token_counter: Optional[TokenCounter] = None,
+) -> Dict[str, Any]:
+    """Return simple statistics about a list of chunks.
+
+    Useful for debugging chunk sizes and tuning parameters.
+    """
+    token_counter = _ensure_token_counter(token_counter)
+    chunks = list(chunks)
+    if not chunks:
+        return {
+            "num_chunks": 0,
+            "min_tokens": 0,
+            "max_tokens": 0,
+            "avg_tokens": 0.0,
+        }
+
+    token_counts = [token_counter(c.text) for c in chunks]
+    num_chunks = len(chunks)
+    min_tokens = min(token_counts)
+    max_tokens = max(token_counts)
+    avg_tokens = sum(token_counts) / num_chunks
+
+    return {
+        "num_chunks": num_chunks,
+        "min_tokens": min_tokens,
+        "max_tokens": max_tokens,
+        "avg_tokens": avg_tokens,
+    }
+
+
+def explain_chunk(chunk: Chunk) -> str:
+    """Return a human-readable explanation of how a chunk was produced."""
+    meta = chunk.meta or {}
+    parts = [
+        f"Strategy: {meta.get('strategy', 'unknown')}",
+        f"Split reason: {meta.get('split_reason', 'unknown')}",
+    ]
+    if "section_index" in meta:
+        parts.append(
+            f"Section #{meta['section_index']} heading={meta.get('section_heading')!r}"
+        )
+    if "paragraph_indices" in meta and meta["paragraph_indices"] is not None:
+        parts.append(f"Paragraphs: {meta['paragraph_indices']}")
+    if "sentence_indices" in meta and meta["sentence_indices"] is not None:
+        parts.append(f"Sentences: {meta['sentence_indices']}")
+    if "chunk_index" in meta:
+        parts.append(f"Chunk index: {meta['chunk_index']}")
+    if meta.get("overlap_from_prev"):
+        parts.append(f"Overlap from previous: {meta.get('overlap_tokens', 0)} tokens")
+    return " | ".join(parts)
