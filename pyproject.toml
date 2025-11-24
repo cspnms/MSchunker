@@ -3,20 +3,26 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mschunker"
+name = "smartchunk"                    # PyPI / pip name
 version = "0.1.0"
-description = "Smart text chunker for LLM preprocessing: sections → paragraphs → sentences → hard splits."
-authors = [
-  { name = "MS" }
-]
+description = "Smart text chunker for LLM preprocessing (sections → paragraphs → sentences → hard splits)."
 readme = "README.md"
-license = { text = "MIT" }
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Marcus Caraus" }
+]
+keywords = ["llm", "rag", "chunking", "nlp", "ai"]
+
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 [project.urls]
 Homepage = "https://github.com/cspnms/MSchunker"
+Source   = "https://github.com/cspnms/MSchunker"
+Issues   = "https://github.com/cspnms/MSchunker/issues"
