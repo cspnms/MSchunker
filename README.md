@@ -1,10 +1,3 @@
-Of course — here is the entire README.md as ONE single copy-paste code block, already complete, already formatted, nothing else needed.
-
-You can paste this exactly into your GitHub README.md file.
-
-⸻
-
-
 #  SmartChunk – Intelligent Text Chunking for LLMs
 
 **SmartChunk** is a lightweight, structure-aware, and deterministic text chunker designed for modern LLM pipelines.
