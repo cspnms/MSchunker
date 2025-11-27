@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mschunker"                    # PyPI / pip name
-version = "0.1.1"
-description = "Smart text chunker for LLM preprocessing (sections → paragraphs → sentences → hard splits)."
+version = "0.1.2"
+description = "MSchunker – Smart text chunker for LLM preprocessing"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
