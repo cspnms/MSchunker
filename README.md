@@ -1,4 +1,4 @@
-#  MSchunker – Intelligent Text Chunking for LLMs
+# MSchunker – Intelligent Text Chunking for LLMs
 
 **MSchunker** is a lightweight, structure-aware, and deterministic text chunker designed for modern LLM pipelines.
 
@@ -14,16 +14,16 @@ MSchunker respects natural document structure (sections → paragraphs → sente
 
 ---
 
-##  Features
+## Features
 
 - **Structure-aware splitting**
   - Detects headings, sections, paragraphs, and sentences
-- **Token / character limits**
+- **Token/character limits**
   - Enforces `max_tokens` and/or `max_chars`
 - **Hierarchical strategy**
   - Paragraphs → sentences → hard splits (fallback)
 - **Optional token overlap**
-  - Adds continuity across consecutive chunks
+  - Adds continuity across chunks
 - **Rich metadata**
   - Section index, paragraph indices, sentence indices, split reasons, offsets
 - **Deterministic output**
@@ -36,23 +36,23 @@ MSchunker respects natural document structure (sections → paragraphs → sente
 
 ---
 
-##  Installation
+## Installation
 
-Install directly from GitHub:
+Install from PyPI:
 
 ```bash
-pip install git+https://github.com/cspnms/MSchunker.git
-
-(Once published to PyPI:)
-
 pip install mschunker
+
+Or directly from GitHub:
+
+pip install git+https://github.com/cspnms/MSchunker.git
 
 
 ⸻
 
- Quickstart
+Quickstart
 
-from mschunker import chunk_text
+from smartchunk import chunk_text
 
 text = "... your long document ..."
 
@@ -72,7 +72,7 @@ for ch in chunks:
 
 ⸻
 
- API Reference
+API Reference
 
 chunk_text(...) — Main function
 
@@ -81,10 +81,10 @@ chunks = chunk_text(
     max_tokens: int | None = 512,
     max_chars: int | None = None,
     overlap_tokens: int = 64,
-    strategy: str = "auto",      # or "fixed"
+    strategy: str = "auto",
     token_counter: callable | None = None,
     source_id: str | None = None,
-    task: str | None = None,     # "rag" | "qa" | "summarization" | "memory"
+    task: str | None = None,   # "rag" | "qa" | "summarization" | "memory"
 )
 
 Returns: List[Chunk]
@@ -93,7 +93,7 @@ Returns: List[Chunk]
 
 Chunker — Stateful wrapper
 
-from mschunker import Chunker
+from smartchunk import Chunker
 
 c = Chunker(
     max_tokens=512,
@@ -110,7 +110,7 @@ chunks = c.chunk(text, source_id="doc-1")
 Chunk — Data Model
 
 Each chunk contains:
-	•	.text – the chunk’s content
+	•	.text – content
 	•	.meta – dictionary with:
 	•	section_index
 	•	section_heading
@@ -125,14 +125,14 @@ Each chunk contains:
 
 ⸻
 
-analyze_chunks(chunks) — Chunk statistics
+analyze_chunks(chunks) — Statistics
 
-from mschunker import analyze_chunks
+from smartchunk import analyze_chunks
 
 stats = analyze_chunks(chunks)
 print(stats)
 
-Example:
+Example output:
 
 {
   "num_chunks": 12,
@@ -146,11 +146,11 @@ Example:
 
 explain_chunk(chunk) — Human-readable explanation
 
-from mschunker import explain_chunk
+from smartchunk import explain_chunk
 
 print(explain_chunk(chunks[0]))
 
-Possible output:
+Example:
 
 Strategy: auto | Split reason: paragraph_boundary |
 Section #0 heading='Introduction' |
@@ -159,44 +159,43 @@ Paragraphs: (0, 1) | Chunk index: 0
 
 ⸻
 
- How SmartChunk Works
+How MSchunker Works
 
-SmartChunk uses a hierarchical, structure-preserving algorithm:
+MSchunker uses a hierarchical, structure-preserving algorithm:
 	1.	Sections / Headings
 	2.	Paragraphs
 	3.	Sentences
 	4.	Hard splits (when paragraphs or sentences exceed limits)
 
-This design mirrors how humans write and ensures chunks are semantically coherent.
+This ensures chunks are semantically coherent and optimized for LLM input.
 
-Optional overlap (overlap_tokens) adds context continuity across chunks—ideal for RAG retrieval and QA workflows.
+Optional overlap_tokens adds continuity across chunks — ideal for RAG and QA.
 
 ⸻
 
- Design Principles
+Design Principles
 	•	Semantic integrity first
-Meaning is preserved whenever possible.
+Meaning preserved whenever possible.
 	•	Deterministic and transparent
-Output and split reasoning are reproducible and explainable.
+Output + reasoning are reproducible.
 	•	Lightweight
-No dependencies on NLP or transformer libraries.
+No NLP or transformer dependencies.
 	•	Extensible foundation
 Future roadmap:
-	•	Semantic chunking (embedding-aware)
+	•	Semantic (embedding-aware) chunking
 	•	Multi-granularity chunk outputs
 	•	Benchmark-driven tuning
-	•	Integration helpers for RAG frameworks
+	•	RAG framework adapters
 
 ⸻
 
- License
+License
 
 MIT License © 2025 MS
 
 ⸻
 
- Contributing
+Contributing
 
 Issues and pull requests are welcome.
-SmartChunk is designed to evolve into a fully intelligent, future-proof chunking engine.
-
+MSchunker is designed to evolve into a fully intelligent, future-proof chunking engine.
