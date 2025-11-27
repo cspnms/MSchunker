@@ -1,4 +1,4 @@
-from mschunker import chunk_text, analyze_chunks, explain_chunk
+from smartchunk import chunk_text, analyze_chunks, explain_chunk
 
 
 def test_basic_chunking_and_metadata():
