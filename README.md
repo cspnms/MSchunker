@@ -1,6 +1,6 @@
-#  SmartChunk – Intelligent Text Chunking for LLMs
+#  MSchunker – Intelligent Text Chunking for LLMs
 
-**SmartChunk** is a lightweight, structure-aware, and deterministic text chunker designed for modern LLM pipelines.
+**MSchunker** is a lightweight, structure-aware, and deterministic text chunker designed for modern LLM pipelines.
 
 It transforms long documents into **LLM-ready chunks** that maintain semantic integrity and are optimized for:
 
@@ -10,7 +10,7 @@ It transforms long documents into **LLM-ready chunks** that maintain semantic in
 - Memory systems
 - Any workflow requiring precise text segmentation
 
-SmartChunk respects natural document structure (sections → paragraphs → sentences) and provides rich metadata, task-aware defaults, and optional overlap for cross-chunk context.
+MSchunker respects natural document structure (sections → paragraphs → sentences) and provides rich metadata, task-aware defaults, and optional overlap for cross-chunk context.
 
 ---
 
@@ -45,14 +45,14 @@ pip install git+https://github.com/cspnms/MSchunker.git
 
 (Once published to PyPI:)
 
-pip install smartchunk
+pip install mschunker
 
 
 ⸻
 
  Quickstart
 
-from smartchunk import chunk_text
+from mschunker import chunk_text
 
 text = "... your long document ..."
 
@@ -93,7 +93,7 @@ Returns: List[Chunk]
 
 Chunker — Stateful wrapper
 
-from smartchunk import Chunker
+from mschunker import Chunker
 
 c = Chunker(
     max_tokens=512,
@@ -127,7 +127,7 @@ Each chunk contains:
 
 analyze_chunks(chunks) — Chunk statistics
 
-from smartchunk import analyze_chunks
+from mschunker import analyze_chunks
 
 stats = analyze_chunks(chunks)
 print(stats)
@@ -146,7 +146,7 @@ Example:
 
 explain_chunk(chunk) — Human-readable explanation
 
-from smartchunk import explain_chunk
+from mschunker import explain_chunk
 
 print(explain_chunk(chunks[0]))
 
