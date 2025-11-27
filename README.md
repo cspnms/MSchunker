@@ -52,7 +52,7 @@ pip install git+https://github.com/cspnms/MSchunker.git
 
 Quickstart
 
-from smartchunk import chunk_text
+from mschunker import chunk_text
 
 text = "... your long document ..."
 
@@ -93,7 +93,7 @@ Returns: List[Chunk]
 
 Chunker — Stateful wrapper
 
-from smartchunk import Chunker
+from mschunker import Chunker
 
 c = Chunker(
     max_tokens=512,
@@ -127,7 +127,7 @@ Each chunk contains:
 
 analyze_chunks(chunks) — Statistics
 
-from smartchunk import analyze_chunks
+from mschunker import analyze_chunks
 
 stats = analyze_chunks(chunks)
 print(stats)
@@ -146,7 +146,7 @@ Example output:
 
 explain_chunk(chunk) — Human-readable explanation
 
-from smartchunk import explain_chunk
+from mschunker import explain_chunk
 
 print(explain_chunk(chunks[0]))
 
@@ -159,7 +159,7 @@ Paragraphs: (0, 1) | Chunk index: 0
 
 ⸻
 
-How MSchunker Works
+How MSchunker Works:
 
 MSchunker uses a hierarchical, structure-preserving algorithm:
 	1.	Sections / Headings
