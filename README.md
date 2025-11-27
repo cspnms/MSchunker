@@ -1,8 +1,13 @@
 # MSchunker – Intelligent Text Chunking for LLMs
 
-**MSchunker** is a lightweight, structure-aware, and deterministic text chunker designed for modern LLM pipelines.
+[![PyPI version](https://img.shields.io/pypi/v/mschunker.svg)](https://pypi.org/project/mschunker/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mschunker.svg)](https://pypi.org/project/mschunker/)
+[![License](https://img.shields.io/pypi/l/mschunker.svg)](https://pypi.org/project/mschunker/)
 
-It transforms long documents into **LLM-ready chunks** that maintain semantic integrity and are optimized for:
+**MSchunker** is a lightweight, structure-aware, deterministic text chunker designed for modern LLM pipelines.
+
+It transforms long documents into **LLM-ready chunks** while preserving semantic boundaries and natural writing structure.  
+Optimized for:
 
 - Retrieval-Augmented Generation (**RAG**)
 - Question Answering (**QA**)
@@ -10,47 +15,51 @@ It transforms long documents into **LLM-ready chunks** that maintain semantic in
 - Memory systems
 - Any workflow requiring precise text segmentation
 
-MSchunker respects natural document structure (sections → paragraphs → sentences) and provides rich metadata, task-aware defaults, and optional overlap for cross-chunk context.
+MSchunker respects document structure (sections → paragraphs → sentences) and provides rich metadata, task-aware defaults, and optional token overlap for cross-chunk continuity.
+
+> 🔗 Links  
+> • PyPI: https://pypi.org/project/mschunker/  
+> • GitHub: https://github.com/cspnms/MSchunker
 
 ---
 
-## Features
+##  Features
 
 - **Structure-aware splitting**
   - Detects headings, sections, paragraphs, and sentences
-- **Token/character limits**
+- **Token / character limits**
   - Enforces `max_tokens` and/or `max_chars`
 - **Hierarchical strategy**
-  - Paragraphs → sentences → hard splits (fallback)
+  - Paragraphs → sentences → hard-split fallback
 - **Optional token overlap**
-  - Adds continuity across chunks
+  - Adds context continuity across chunks
 - **Rich metadata**
-  - Section index, paragraph indices, sentence indices, split reasons, offsets
+  - Section index, paragraph indices, sentence indices, split reasons
 - **Deterministic output**
   - Same input + same settings → identical chunks
 - **Lightweight**
-  - Zero heavy NLP / ML dependencies
-- **Clean, simple API**
-  - `chunk_text(...)` handles everything
-  - `Chunker` for stateful usage
+  - No heavy NLP / ML dependencies
+- **Clean API**
+  - `chunk_text()` function
+  - `Chunker` class for stateful use
 
 ---
 
 ## Installation
 
-Install from PyPI:
+From PyPI:
 
 ```bash
 pip install mschunker
 
-Or directly from GitHub:
+Or latest version from GitHub:
 
 pip install git+https://github.com/cspnms/MSchunker.git
 
 
 ⸻
 
-Quickstart
+##  QuikStart
 
 from mschunker import chunk_text
 
@@ -72,26 +81,28 @@ for ch in chunks:
 
 ⸻
 
-API Reference
+##  API Reference
 
-chunk_text(...) — Main function
+### chunk_text(...)
+
+Main function:
 
 chunks = chunk_text(
     text: str,
     max_tokens: int | None = 512,
     max_chars: int | None = None,
     overlap_tokens: int = 64,
-    strategy: str = "auto",
+    strategy: str = "auto",          # or "fixed"
     token_counter: callable | None = None,
     source_id: str | None = None,
-    task: str | None = None,   # "rag" | "qa" | "summarization" | "memory"
+    task: str | None = None,         # rag | qa | summarization | memory
 )
 
 Returns: List[Chunk]
 
 ⸻
 
-Chunker — Stateful wrapper
+### Chunker — Stateful Wrapper
 
 from mschunker import Chunker
 
@@ -107,11 +118,11 @@ chunks = c.chunk(text, source_id="doc-1")
 
 ⸻
 
-Chunk — Data Model
+##  Chunk Data Model
 
-Each chunk contains:
-	•	.text – content
-	•	.meta – dictionary with:
+Each Chunk contains:
+	•	.text — the chunk content
+	•	.meta — metadata including:
 	•	section_index
 	•	section_heading
 	•	paragraph_indices
@@ -125,14 +136,16 @@ Each chunk contains:
 
 ⸻
 
-analyze_chunks(chunks) — Statistics
+##  Utilities
+
+### analyze_chunks(chunks)
 
 from mschunker import analyze_chunks
 
 stats = analyze_chunks(chunks)
 print(stats)
 
-Example output:
+Example:
 
 {
   "num_chunks": 12,
@@ -144,13 +157,13 @@ Example output:
 
 ⸻
 
-explain_chunk(chunk) — Human-readable explanation
+### explain_chunk(chunk)
 
 from mschunker import explain_chunk
 
 print(explain_chunk(chunks[0]))
 
-Example:
+Example result:
 
 Strategy: auto | Split reason: paragraph_boundary |
 Section #0 heading='Introduction' |
@@ -159,43 +172,27 @@ Paragraphs: (0, 1) | Chunk index: 0
 
 ⸻
 
-How MSchunker Works:
+##  How MSchunker Works
 
 MSchunker uses a hierarchical, structure-preserving algorithm:
 	1.	Sections / Headings
 	2.	Paragraphs
 	3.	Sentences
-	4.	Hard splits (when paragraphs or sentences exceed limits)
+	4.	Hard splits (fallback)
 
-This ensures chunks are semantically coherent and optimized for LLM input.
+This ensures chunks remain coherent and optimized for LLM input.
 
-Optional overlap_tokens adds continuity across chunks — ideal for RAG and QA.
-
-⸻
-
-Design Principles
-	•	Semantic integrity first
-Meaning preserved whenever possible.
-	•	Deterministic and transparent
-Output + reasoning are reproducible.
-	•	Lightweight
-No NLP or transformer dependencies.
-	•	Extensible foundation
-Future roadmap:
-	•	Semantic (embedding-aware) chunking
-	•	Multi-granularity chunk outputs
-	•	Benchmark-driven tuning
-	•	RAG framework adapters
+overlap_tokens adds cross-chunk continuity—ideal for RAG or QA systems.
 
 ⸻
 
-License
+##  License
 
 MIT License © 2025 MS
 
 ⸻
 
-Contributing
+##  Contributing
 
 Issues and pull requests are welcome.
 MSchunker is designed to evolve into a fully intelligent, future-proof chunking engine.
