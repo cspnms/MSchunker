@@ -33,7 +33,7 @@ def test_empty_text_returns_empty_list():
 
 
 def test_long_text_does_not_crash_and_produces_chunks():
-    # Long flat text – SmartChunk may return 1 or many chunks;
+    # Long flat text – MSchunker may return 1 or many chunks;
     # we only require that it works and chunks are non-empty.
     text = " ".join(f"word{i}" for i in range(300))
 
