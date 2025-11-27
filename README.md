@@ -2,7 +2,6 @@
 
 [![PyPI version](https://badge.fury.io/py/mschunker.svg)](https://pypi.org/project/mschunker/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mschunker.svg)](https://pypi.org/project/mschunker/)
-[![License](https://img.shields.io/github/license/cspnms/MSchunker.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
 
 **MSchunker** is a lightweight, structure-aware, deterministic text chunker designed for modern LLM pipelines.
