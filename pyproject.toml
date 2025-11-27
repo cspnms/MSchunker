@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "smartchunk"                    # PyPI / pip name
-version = "0.1.0"
+name = "mschunker"                    # PyPI / pip name
+version = "0.1.1"
 description = "Smart text chunker for LLM preprocessing (sections → paragraphs → sentences → hard splits)."
 readme = "README.md"
 requires-python = ">=3.9"
