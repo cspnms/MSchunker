@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.PNG" width="200"/>
+  <img src="logo.PNG" width="200" alt="MSchunker logo">
 </p>
 
 # MSchunker – Intelligent Text Chunking for LLMs
