@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" width="160"/>
+</p>
+
 # MSchunker – Intelligent Text Chunking for LLMs
 
 [![PyPI version](https://badge.fury.io/py/mschunker.svg)](https://pypi.org/project/mschunker/)
