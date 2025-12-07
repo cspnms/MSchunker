@@ -1,15 +1,44 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Dict, Any, Tuple, Iterable
+from typing import (
+    Callable,
+    List,
+    Optional,
+    Dict,
+    Any,
+    Tuple,
+    Iterable,
+    Pattern,
+    TypedDict,
+    Literal,
+    cast,
+)
 import re
+import warnings
 
 # -----------------------------
 # Types
 # -----------------------------
 
 TokenCounter = Callable[[str], int]
+SentenceSplitter = Callable[[str], List[str]]
 SemanticSimilarity = Callable[[str, str], float]
+
+
+class ChunkMeta(TypedDict, total=False):
+    """Typed metadata container for chunks."""
+
+    section_index: Optional[int]
+    section_heading: Optional[str]
+    paragraph_indices: Optional[Tuple[int, int]]
+    sentence_indices: Optional[Tuple[int, int]]
+    split_reason: Literal["paragraph_boundary", "sentence_limit", "hard_limit"]
+    strategy: Literal["auto", "fixed"]
+    overlap_from_prev: bool
+    overlap_tokens: int
+    chunk_index: int
+    source_id: Optional[str]
 
 
 @dataclass
@@ -34,7 +63,7 @@ class Chunk:
         - chunk_index: int (sequential id)
     """
     text: str
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: ChunkMeta = field(default_factory=lambda: cast(ChunkMeta, {}))
 
 
 # -----------------------------
@@ -43,18 +72,75 @@ class Chunk:
 
 _DEFAULT_SENTENCE_REGEX = re.compile(r"(?<=[.!?。！？])\s+")
 _HEADING_REGEX = re.compile(r"^\s*#{1,6}\s+(.+)$")
+_TIKTOKEN_ENCODER: Any = None
 
 
 def _default_token_counter(text: str) -> int:
-    """Very simple whitespace-based token counter.
+    """Token counter that prefers a tokenizer-aware fallback when available.
 
-    Users can pass a more accurate counter (e.g. using tiktoken) if needed.
+    If `tiktoken` is installed, this uses the "cl100k_base" encoding; otherwise
+    it falls back to a simple whitespace split.
     """
+
+    global _TIKTOKEN_ENCODER
+    if _TIKTOKEN_ENCODER is None:
+        try:
+            import tiktoken
+
+            _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _TIKTOKEN_ENCODER = False
+
+    if _TIKTOKEN_ENCODER:
+        try:
+            return len(_TIKTOKEN_ENCODER.encode(text))
+        except Exception:
+            # Fallback gracefully if encoding fails
+            return len(text.split())
     return len(text.split())
 
 
 def _ensure_token_counter(counter: Optional[TokenCounter]) -> TokenCounter:
     return counter or _default_token_counter
+
+
+def _ensure_sentence_splitter(
+    sentence_splitter: Optional[SentenceSplitter],
+    sentence_regex: Optional[Pattern[str]],
+) -> SentenceSplitter:
+    regex = sentence_regex or _DEFAULT_SENTENCE_REGEX
+
+    def _split(paragraph: str) -> List[str]:
+        paragraph = paragraph.strip()
+        if not paragraph:
+            return []
+        parts = regex.split(paragraph)
+        return [s.strip() for s in parts if s.strip()]
+
+    return sentence_splitter or _split
+
+
+def _build_meta(
+    *,
+    section_index: Optional[int],
+    section_heading: Optional[str],
+    paragraph_indices: Optional[Tuple[int, int]],
+    sentence_indices: Optional[Tuple[int, int]],
+    split_reason: Literal["paragraph_boundary", "sentence_limit", "hard_limit"],
+    strategy: Literal["auto", "fixed"],
+    source_id: Optional[str],
+) -> ChunkMeta:
+    meta: ChunkMeta = {
+        "section_index": section_index if section_index is not None else None,
+        "section_heading": section_heading,
+        "paragraph_indices": paragraph_indices,
+        "sentence_indices": sentence_indices,
+        "split_reason": split_reason,
+        "strategy": strategy,
+    }
+    if source_id is not None:
+        meta["source_id"] = source_id
+    return meta
 
 
 def _length_ok(
@@ -133,16 +219,13 @@ def _split_into_paragraphs(text: str) -> List[str]:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-def _split_into_sentences(paragraph: str) -> List[str]:
-    """Split a paragraph into sentences.
+def _split_into_sentences(
+    paragraph: str,
+    splitter: SentenceSplitter,
+) -> List[str]:
+    """Split a paragraph into sentences using a provided splitter."""
 
-    This is a heuristic splitter; users can pre-split if they need more control.
-    """
-    paragraph = paragraph.strip()
-    if not paragraph:
-        return []
-    parts = _DEFAULT_SENTENCE_REGEX.split(paragraph)
-    return [s.strip() for s in parts if s.strip()]
+    return splitter(paragraph)
 
 
 # -----------------------------
@@ -194,6 +277,7 @@ def _chunk_section(
     max_tokens: Optional[int],
     max_chars: Optional[int],
     token_counter: TokenCounter,
+    sentence_splitter: SentenceSplitter,
     strategy: str,
 ) -> List[Chunk]:
     """Chunk a single section using paragraphs/sentences and fallbacks."""
@@ -204,14 +288,15 @@ def _chunk_section(
             chunks.append(
                 Chunk(
                     text=piece,
-                    meta={
-                        "section_index": section_index,
-                        "section_heading": section_heading,
-                        "paragraph_indices": None,
-                        "sentence_indices": None,
-                        "split_reason": "hard_limit",
-                        "strategy": strategy,
-                    },
+                    meta=_build_meta(
+                        section_index=section_index,
+                        section_heading=section_heading,
+                        paragraph_indices=None,
+                        sentence_indices=None,
+                        split_reason="hard_limit",
+                        strategy=cast(Literal["auto", "fixed"], strategy),
+                        source_id=None,
+                    ),
                 )
             )
         return chunks
@@ -232,14 +317,18 @@ def _chunk_section(
         chunks.append(
             Chunk(
                 text=text,
-                meta={
-                    "section_index": section_index,
-                    "section_heading": section_heading,
-                    "paragraph_indices": para_indices,
-                    "sentence_indices": None,
-                    "split_reason": reason,
-                    "strategy": strategy,
-                },
+                meta=_build_meta(
+                    section_index=section_index,
+                    section_heading=section_heading,
+                    paragraph_indices=para_indices,
+                    sentence_indices=None,
+                    split_reason=cast(
+                        Literal["paragraph_boundary", "sentence_limit", "hard_limit"],
+                        reason,
+                    ),
+                    strategy=cast(Literal["auto", "fixed"], strategy),
+                    source_id=None,
+                ),
             )
         )
         current_buffer = []
@@ -254,21 +343,22 @@ def _chunk_section(
             # Flush current paragraphs buffer first.
             flush_buffer("paragraph_boundary")
 
-            sentences = _split_into_sentences(para)
+            sentences = _split_into_sentences(para, sentence_splitter)
             if not sentences:
                 # Last resort: hard split paragraph
                 for piece in _hard_split(para, max_tokens, max_chars, token_counter):
                     chunks.append(
                         Chunk(
                             text=piece,
-                            meta={
-                                "section_index": section_index,
-                                "section_heading": section_heading,
-                                "paragraph_indices": (para_index, para_index),
-                                "sentence_indices": None,
-                                "split_reason": "hard_limit",
-                                "strategy": strategy,
-                            },
+                            meta=_build_meta(
+                                section_index=section_index,
+                                section_heading=section_heading,
+                                paragraph_indices=(para_index, para_index),
+                                sentence_indices=None,
+                                split_reason="hard_limit",
+                                strategy=cast(Literal["auto", "fixed"], strategy),
+                                source_id=None,
+                            ),
                         )
                     )
                 continue
@@ -289,14 +379,15 @@ def _chunk_section(
                         chunks.append(
                             Chunk(
                                 text=text,
-                                meta={
-                                    "section_index": section_index,
-                                    "section_heading": section_heading,
-                                    "paragraph_indices": (para_index, para_index),
-                                    "sentence_indices": sent_indices,
-                                    "split_reason": "sentence_limit",
-                                    "strategy": strategy,
-                                },
+                                meta=_build_meta(
+                                    section_index=section_index,
+                                    section_heading=section_heading,
+                                    paragraph_indices=(para_index, para_index),
+                                    sentence_indices=sent_indices,
+                                    split_reason="sentence_limit",
+                                    strategy=cast(Literal["auto", "fixed"], strategy),
+                                    source_id=None,
+                                ),
                             )
                         )
                     # Start new buffer with current sentence
@@ -308,14 +399,15 @@ def _chunk_section(
                 chunks.append(
                     Chunk(
                         text=text,
-                        meta={
-                            "section_index": section_index,
-                            "section_heading": section_heading,
-                            "paragraph_indices": (para_index, para_index),
-                            "sentence_indices": sent_indices,
-                            "split_reason": "sentence_limit",
-                            "strategy": strategy,
-                        },
+                        meta=_build_meta(
+                            section_index=section_index,
+                            section_heading=section_heading,
+                            paragraph_indices=(para_index, para_index),
+                            sentence_indices=sent_indices,
+                            split_reason="sentence_limit",
+                            strategy=cast(Literal["auto", "fixed"], strategy),
+                            source_id=None,
+                        ),
                     )
                 )
         else:
@@ -345,12 +437,9 @@ def _apply_overlap(
     token_counter: TokenCounter,
     max_tokens: Optional[int],
     max_chars: Optional[int],
+    enforce_overlap_limits: bool,
 ) -> List[Chunk]:
     """Apply token-based overlap between consecutive chunks.
-
-    Overlap is best-effort: we do not strictly re-enforce max_tokens/max_chars
-    after overlap to avoid destroying context. Users needing strict limits can
-    post-process or set overlap to 0.
     """
     if overlap_tokens <= 0 or len(chunks) <= 1:
         # Still annotate chunk_index for convenience
@@ -377,20 +466,31 @@ def _apply_overlap(
 
         # Determine overlap slice from previous chunk
         overlap_slice = prev_tokens[-overlap_tokens:] if prev_tokens else []
-        if overlap_slice:
-            prefix = " ".join(overlap_slice)
-            new_text = prefix + "\n\n" + text
-        else:
-            new_text = text
+        overlap_used = overlap_slice
+        prefix = " ".join(overlap_used)
+        new_text = prefix + "\n\n" + text if prefix else text
+
+        if overlap_used and enforce_overlap_limits:
+            while overlap_used and not _length_ok(
+                new_text, max_tokens, max_chars, token_counter
+            ):
+                overlap_used = overlap_used[1:]
+                prefix = " ".join(overlap_used)
+                new_text = prefix + "\n\n" + text if prefix else text
+        elif overlap_used and not _length_ok(
+            new_text, max_tokens, max_chars, token_counter
+        ):
+            warnings.warn(
+                "Chunk exceeds limits after applying overlap; set"
+                " enforce_overlap_limits=True to trim.",
+                RuntimeWarning,
+            )
 
         ch.text = new_text
         ch.meta["chunk_index"] = idx
-        ch.meta["overlap_from_prev"] = bool(overlap_slice)
-        ch.meta["overlap_tokens"] = len(overlap_slice)
+        ch.meta["overlap_from_prev"] = bool(overlap_used)
+        ch.meta["overlap_tokens"] = len(overlap_used)
 
-        # We deliberately do not trim to max_tokens/max_chars here,
-        # to preserve context boundary decisions. Users can enforce
-        # hard limits at the call-site if absolutely required.
         overlapped.append(ch)
         prev_tokens = tokens
 
@@ -409,8 +509,11 @@ def chunk_text(
     overlap_tokens: int = 64,
     strategy: str = "auto",
     token_counter: Optional[TokenCounter] = None,
+    sentence_splitter: Optional[SentenceSplitter] = None,
+    sentence_regex: Optional[Pattern[str]] = None,
     source_id: Optional[str] = None,
     task: Optional[str] = None,
+    enforce_overlap_limits: bool = False,
 ) -> List[Chunk]:
     """Chunk text into LLM-ready pieces.
 
@@ -429,11 +532,17 @@ def chunk_text(
         "fixed" -> ignore structure, just hard-split
     token_counter:
         Optional custom token counter.
+    sentence_splitter:
+        Optional callable to split a paragraph into sentences.
+    sentence_regex:
+        Optional regex used by the default sentence splitter.
     source_id:
         Optional identifier for the source document, stored in metadata.
     task:
         Optional hint: "rag", "qa", "summarization", "memory".
         Used only to adjust sane defaults if max_tokens is None.
+    enforce_overlap_limits:
+        When True, trims overlap to keep chunks within max_tokens/max_chars.
 
     Returns
     -------
@@ -441,6 +550,7 @@ def chunk_text(
         A list of Chunk objects with text and rich metadata.
     """
     token_counter = _ensure_token_counter(token_counter)
+    sentence_splitter = _ensure_sentence_splitter(sentence_splitter, sentence_regex)
 
     if not text or not text.strip():
         return []
@@ -472,6 +582,7 @@ def chunk_text(
             max_tokens=max_tokens,
             max_chars=max_chars,
             token_counter=token_counter,
+            sentence_splitter=sentence_splitter,
             strategy=strategy,
         )
         for ch in section_chunks:
@@ -485,6 +596,7 @@ def chunk_text(
         token_counter=token_counter,
         max_tokens=max_tokens,
         max_chars=max_chars,
+        enforce_overlap_limits=enforce_overlap_limits,
     )
 
     return all_chunks
@@ -506,14 +618,20 @@ class Chunker:
         overlap_tokens: int = 64,
         strategy: str = "auto",
         token_counter: Optional[TokenCounter] = None,
+        sentence_splitter: Optional[SentenceSplitter] = None,
+        sentence_regex: Optional[Pattern[str]] = None,
         task: Optional[str] = None,
+        enforce_overlap_limits: bool = False,
     ) -> None:
         self.max_tokens = max_tokens
         self.max_chars = max_chars
         self.overlap_tokens = overlap_tokens
         self.strategy = strategy
         self.token_counter = token_counter
+        self.sentence_splitter = sentence_splitter
+        self.sentence_regex = sentence_regex
         self.task = task
+        self.enforce_overlap_limits = enforce_overlap_limits
 
     def chunk(self, text: str, source_id: Optional[str] = None) -> List[Chunk]:
         return chunk_text(
@@ -523,8 +641,11 @@ class Chunker:
             overlap_tokens=self.overlap_tokens,
             strategy=self.strategy,
             token_counter=self.token_counter,
+            sentence_splitter=self.sentence_splitter,
+            sentence_regex=self.sentence_regex,
             source_id=source_id,
             task=self.task,
+            enforce_overlap_limits=self.enforce_overlap_limits,
         )
 
 
@@ -584,4 +705,6 @@ def explain_chunk(chunk: Chunk) -> str:
         parts.append(f"Chunk index: {meta['chunk_index']}")
     if meta.get("overlap_from_prev"):
         parts.append(f"Overlap from previous: {meta.get('overlap_tokens', 0)} tokens")
+    if meta.get("source_id"):
+        parts.append(f"Source: {meta['source_id']}")
     return " | ".join(parts)
