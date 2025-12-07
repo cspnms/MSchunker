@@ -63,8 +63,9 @@ pip install git+https://github.com/cspnms/MSchunker.git
 
 ⸻
 
-##  QuikStart
+##  QuickStart
 
+```python
 from mschunker import chunk_text
 
 text = "... your long document ..."
@@ -81,6 +82,7 @@ for ch in chunks:
     print("---- CHUNK ----")
     print(ch.text[:200], "...")
     print(ch.meta)
+```
 
 
 ⸻
@@ -98,11 +100,36 @@ chunks = chunk_text(
     overlap_tokens: int = 64,
     strategy: str = "auto",          # or "fixed"
     token_counter: callable | None = None,
+    sentence_splitter: callable | None = None,
+    sentence_regex: Pattern[str] | None = None,
     source_id: str | None = None,
     task: str | None = None,         # rag | qa | summarization | memory
+    enforce_overlap_limits: bool = False,
 )
 
 Returns: List[Chunk]
+
+#### Advanced configuration
+
+- **Tokenizer-aware counting:** If `tiktoken` is installed, `chunk_text` automatically counts tokens with the `cl100k_base` encoding. Pass your own `token_counter` callable to match a different model.
+- **Sentence splitting:** Provide a custom `sentence_splitter` callable (or a `sentence_regex` pattern) to handle domain-specific punctuation or multilingual text.
+- **Overlap enforcement:** Set `enforce_overlap_limits=True` to trim overlapped prefixes that would otherwise exceed `max_tokens`/`max_chars`.
+
+```python
+from mschunker import chunk_text
+
+custom_regex = r"(?<=[.!?…])\s+"  # accept unicode ellipses
+
+chunks = chunk_text(
+    text,
+    max_tokens=200,
+    overlap_tokens=32,
+    sentence_regex=custom_regex,
+    enforce_overlap_limits=True,
+)
+```
+
+> ℹ️ Without `tiktoken`, token counts fall back to a whitespace split. For strict model parity, install `tiktoken` or supply a custom `token_counter` aligned with your tokenizer.
 
 ⸻
 
@@ -187,6 +214,16 @@ MSchunker uses a hierarchical, structure-preserving algorithm:
 This ensures chunks remain coherent and optimized for LLM input.
 
 overlap_tokens adds cross-chunk continuity—ideal for RAG or QA systems.
+
+⸻
+
+## Changelog
+
+- **0.2.0**
+  - Added optional `enforce_overlap_limits` trimming for overlapped chunks.
+  - Introduced tokenizer-aware default counter (uses `tiktoken` when available).
+  - Allow custom sentence splitters or regex patterns for language-specific needs.
+  - Defined typed chunk metadata and expanded tests to cover headings and overlaps.
 
 ⸻
 
